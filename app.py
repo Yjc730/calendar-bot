@@ -7,85 +7,63 @@ st.set_page_config(page_title="行事曆分析助理", page_icon="📅")
 st.title("📅 智能行事曆分析助理")
 st.caption("上傳行事曆截圖或照片，AI 幫您分析行程 | 供內部使用")
 
-# --- 自動讀取 API Key (從 Secrets) ---
+# --- 自動讀取 API Key ---
 try:
     api_key = st.secrets["GOOGLE_API_KEY"]
     genai.configure(api_key=api_key)
 except Exception:
-    st.error("⚠️ 未偵測到 API Key。請管理者至 Streamlit 後台 Settings -> Secrets 設定 GOOGLE_API_KEY。")
+    st.error("⚠️ 未偵測到 API Key。請至 Streamlit Settings -> Secrets 設定。")
     st.stop()
 
-# --- 側邊欄：圖片上傳區 ---
+# --- 側邊欄 ---
 with st.sidebar:
     st.header("📸 上傳行事曆")
-    uploaded_file = st.file_uploader("請上傳照片或截圖 (jpg, png)", type=["jpg", "jpeg", "png"])
+    uploaded_file = st.file_uploader("請上傳照片 (jpg, png)", type=["jpg", "jpeg", "png"])
     
     image = None
-    if uploaded_file is not None:
-        # 顯示預覽圖
+    if uploaded_file:
         image = Image.open(uploaded_file)
-        st.image(image, caption="已上傳的行事曆", use_column_width=True)
+        st.image(image, caption="預覽", use_column_width=True)
         st.success("圖片讀取成功！")
-    else:
-        st.info("💡 提示：您可以截圖 Google Calendar 或拍下紙本行事曆上傳。")
 
-# --- 初始化對話紀錄 ---
+# --- 初始化對話 ---
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "model", "content": "你好！我是你的行事曆助理。請上傳行事曆照片，或者直接貼上行程文字，我會幫你整理並檢查衝突。"}
+        {"role": "assistant", "content": "你好！請上傳行事曆照片，我會幫你整理行程。"}
     ]
 
-# --- 顯示歷史訊息 ---
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+for msg in st.session_state.messages:
+    st.chat_message(msg["role"]).write(msg["content"])
 
-# --- 處理使用者輸入 ---
-if prompt := st.chat_input("輸入指令... (例如：幫我分析這週行程有什麼衝突？)"):
-    
-    # 1. 顯示使用者文字
+# --- 主要邏輯 ---
+if prompt := st.chat_input("輸入指令..."):
+    st.chat_message("user").write(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
 
-    # 2. 呼叫 AI (包含錯誤處理)
+    # 準備輸入內容
+    content_input = [prompt]
+    if image:
+        content_input.append(image)
+        # 加入提示詞引導
+        content_input.insert(0, "請分析這張行事曆圖片，列出日期、時間與事件，並檢查衝突。")
+
+    # --- 關鍵修改：模型選擇邏輯 ---
+    # 1. 先嘗試用最新的 Flash
+    # 2. 失敗則用舊版 Vision
     try:
-        # 嘗試使用最新的 Flash 模型
-        try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
-        except:
-            st.warning("⚠️ 系統提示：環境版本較舊，正嘗試切換至舊版模型...")
-            model = genai.GenerativeModel('gemini-pro-vision')
-
-        # 準備發送給 AI 的內容
-        inputs = []
-        
-        # 系統提示詞
-        system_prompt = "你是一個專業秘書。請分析使用者的輸入（可能是文字或行事曆圖片）。如果是圖片，請仔細辨識上面的日期與時間。請列出行程清單，並檢查是否有時間衝突。請用繁體中文回答。"
-        inputs.append(system_prompt)
-        
-        # 加入使用者文字
-        inputs.append(prompt)
-
-        # 如果有圖片，加入圖片
-        if image:
-            inputs.append(image)
-
-        with st.chat_message("model"):
-            message_placeholder = st.empty()
-            
-            # 發送請求
-            response = model.generate_content(inputs, stream=True)
-            
-            full_response = ""
-            for chunk in response:
-                if chunk.text:
-                    full_response += chunk.text
-                    message_placeholder.markdown(full_response + "▌")
-            message_placeholder.markdown(full_response)
-            
-        st.session_state.messages.append({"role": "model", "content": full_response})
-
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(content_input) # 嘗試生成
     except Exception as e:
-        st.error(f"發生錯誤：{e}")
-        st.markdown("建議：如果是模型版本問題，請確認 `requirements.txt` 已更新為 `google-generativeai>=0.7.0` 並重新部署 App。")
+        # 捕捉 404 錯誤，改用舊版模型
+        try:
+            st.toast("⚠️ 系統提示：切換至 gemini-pro-vision 模型")
+            model = genai.GenerativeModel('gemini-pro-vision')
+            response = model.generate_content(content_input)
+        except Exception as e2:
+            st.error(f"所有模型都嘗試失敗。請檢查 API Key 或稍後再試。\n錯誤訊息: {e2}")
+            st.stop()
+
+    # 顯示結果
+    if response and response.text:
+        st.chat_message("assistant").write(response.text)
+        st.session_state.messages.append({"role": "assistant", "content": response.text})
