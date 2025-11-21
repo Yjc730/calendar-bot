@@ -51,7 +51,7 @@ if prompt := st.chat_input("輸入指令... (例如：幫我分析這週行程�
 
     # 呼叫 AI
     try:
-        model = genai.GenerativeModel('gemini-1.5-pro')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
         # 準備發送給 AI 的內容
         # 如果有上傳圖片，就把圖片跟文字一起送出去
