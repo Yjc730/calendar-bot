@@ -5,7 +5,14 @@ from PIL import Image
 # --- 頁面設定 ---
 st.set_page_config(page_title="行事曆分析助理", page_icon="📅")
 st.title("📅 智能行事曆分析助理")
-st.caption("上傳行事曆截圖或照片，AI 幫您分析行程 | 供內部使用")
+
+# --- 診斷訊息 (除錯用) ---
+# 這行會顯示在網頁最上方，確認 SDK 版本是否正確
+st.caption(f"系統診斷：Google GenAI SDK 版本: {genai.__version__}")
+
+if genai.__version__ < "0.7.0":
+    st.error("⚠️ 系統偵測到版本過舊！請修改 requirements.txt 為 google-generativeai==0.8.3 並選擇 'Reboot app'。")
+    st.stop()
 
 # --- 自動讀取 API Key ---
 try:
@@ -29,7 +36,7 @@ with st.sidebar:
 # --- 初始化對話 ---
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "你好！請上傳行事曆照片，我會幫你整理行程。"}
+        {"role": "assistant", "content": "你好！我是行事曆助理 (使用 Gemini 1.5 Flash 模型)。請上傳照片或輸入文字。"}
     ]
 
 for msg in st.session_state.messages:
@@ -40,30 +47,29 @@ if prompt := st.chat_input("輸入指令..."):
     st.chat_message("user").write(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # 準備輸入內容
+    # 準備輸入
     content_input = [prompt]
     if image:
         content_input.append(image)
-        # 加入提示詞引導
-        content_input.insert(0, "請分析這張行事曆圖片，列出日期、時間與事件，並檢查衝突。")
+        content_input.insert(0, "請分析這張行事曆圖片，列出日期、時間與事件。")
 
-    # --- 關鍵修改：模型選擇邏輯 ---
-    # 1. 先嘗試用最新的 Flash
-    # 2. 失敗則用舊版 Vision
+    # 呼叫 AI
     try:
+        # 只使用最新的 1.5 Flash，不再退回舊版
         model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(content_input) # 嘗試生成
-    except Exception as e:
-        # 捕捉 404 錯誤，改用舊版模型
-        try:
-            st.toast("⚠️ 系統提示：切換至 gemini-pro-vision 模型")
-            model = genai.GenerativeModel('gemini-pro-vision')
-            response = model.generate_content(content_input)
-        except Exception as e2:
-            st.error(f"所有模型都嘗試失敗。請檢查 API Key 或稍後再試。\n錯誤訊息: {e2}")
-            st.stop()
+        
+        with st.chat_message("assistant"):
+            response = model.generate_content(content_input, stream=True)
+            full_response = ""
+            placeholder = st.empty()
+            for chunk in response:
+                if chunk.text:
+                    full_response += chunk.text
+                    placeholder.markdown(full_response + "▌")
+            placeholder.markdown(full_response)
+            
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
 
-    # 顯示結果
-    if response and response.text:
-        st.chat_message("assistant").write(response.text)
-        st.session_state.messages.append({"role": "assistant", "content": response.text})
+    except Exception as e:
+        st.error(f"發生錯誤：{e}")
+        st.info("如果持續報錯 404，請檢查您的 API Key 是否正確，或該 Key 是否有啟用 Generative AI API 權限。")
