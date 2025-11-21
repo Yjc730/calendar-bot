@@ -49,9 +49,13 @@ if prompt := st.chat_input("輸入指令... (例如：幫我分析這週行程�
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # 呼叫 AI
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+    # 嘗試使用最新的 Flash 模型
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+        except:
+            # 如果失敗，退回舊版 Vision 模型 (專門看圖的)
+            st.warning("⚠️ 系統偵測到環境版本較舊，已自動切換至 gemini-pro-vision 模型。")
+            model = genai.GenerativeModel('gemini-pro-vision')
         
         # 準備發送給 AI 的內容
         # 如果有上傳圖片，就把圖片跟文字一起送出去
